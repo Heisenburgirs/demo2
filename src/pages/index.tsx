@@ -18,7 +18,7 @@ const dcaRewards = [
     name: 'USDC / ETH',
     tokens: { from: 'USDC', to: 'ETH' },
     monthlyVolume: '21,734.632',
-    dailyRewards: { amount: '15000', token: 'FLOW' },
+    dailyRewards: { amount: '10,000,000', token: 'FLOW' },
     apr: '3.15%',
     isLive: true 
   },
@@ -30,8 +30,14 @@ const cfaABI = [
 
 const sbIncentivesABI = [
   'function registerOrUpdateStream(address user)',
-    'function startStreamToPool(int96 requestedFlowRate) external', // Added new function
+  'function startStreamToPool(int96 requestedFlowRate) external', // Added new function
+  'function connectPool(address pool, bytes userData) returns (bool)',
+];
 
+const gdaV1ABI = [
+  'function registerOrUpdateStream(address user)',
+  'function connectPool(address pool, bytes userData) returns (bool)',
+  'function claimAll(address pool, address memberAddress, bytes userData) returns (bool success)',
 ];
 
 const Home: NextPage = () => {
@@ -39,6 +45,7 @@ const Home: NextPage = () => {
   const [currentStreamedAmounts, setCurrentStreamedAmounts] = useState<{ [key: string]: string }>({});
 
   const [deletingPositions, setDeletingPositions] = useState<{ [key: string]: boolean }>({});
+  const [connectingRewards, setConnectingRewards] = useState<{ [key: string]: boolean }>({});
 
   const [isDCAOverlayOpen, setIsDCAOverlayOpen] = useState(false);
   const [updateAmount, setUpdateAmount] = useState('');
@@ -47,7 +54,7 @@ const Home: NextPage = () => {
 
   const { address, isConnected } = useAccount();
   const [openConnectModalFn, setOpenConnectModalFn] = useState<(() => void) | null>(null);
-  const { positionData, loading, error } = usePosition();
+  const { positionData, loading, error, refetchWithDelay } = usePosition();
   
   const tokenContext = useTokenContext();
 
@@ -181,39 +188,89 @@ const Home: NextPage = () => {
   };
 
   const handleRegistration = async (poolId: string) => {
+    console.log("Pool ID:", poolId);
+    if (!window.ethereum) {
+      console.error("Ethereum provider not found");
+      console.log("2");
+      return;
+    }
+
+    setConnectingRewards(prev => ({ ...prev, [poolId]: true }));
+
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    const signer = provider.getSigner();
+    const sbIncentives = new ethers.Contract("0x07C848357A1a5d1787BbbD07aEC831D54e91cb88", sbIncentivesABI, signer);
+    const gdaV1 = new ethers.Contract("0x6DA13Bde224A05a288748d857b9e7DDEffd1dE08", gdaV1ABI, signer);
+
+    try {
+      // First transaction - Start Stream To Pool
+      /*const flowRate = "3858024691358024"; // You might want to make this configurable
+      const tx1 = await sbIncentives.startStreamToPool(
+        flowRate,
+        { gasLimit: 3000000 }
+      );
+      await tx1.wait();
+      console.log("Stream started successfully");*/
+  
+      // Second transaction - Register/Update Stream
+      const tx2 = await sbIncentives.registerOrUpdateStream(
+        address,
+        { gasLimit: 3000000 }
+      );
+      await tx2.wait();
+      console.log("Registration successful");
+  
+      // Third transaction - Connect Pool using GDAv1 contract
+      const poolAddress = "0x7eb91C15d1fFb8100Be772B071619736d6a2f1ac";
+      /*const tx3 = await gdaV1.connectPool(
+        poolAddress,
+        "0x", // empty bytes
+        { gasLimit: 3000000 }
+      );*/
+
+      //await tx3.wait();
+      //console.log("Pool connection successful");
+
+      // Fourth transaction - Claim All
+      const tx4 = await gdaV1.claimAll(
+        poolAddress,
+        address,
+        "0x", // empty bytes
+        { gasLimit: 3000000 }
+      );
+      await tx4.wait();
+      console.log("Claim all successful");
+
+      refetchWithDelay(1000);
+
+    } catch (error) {
+      console.error("Error in registration process:", error);
+    } finally {
+      setConnectingRewards(prev => ({ ...prev, [poolId]: false }));
+    }
+  };
+
+  const handleLiquidate = async () => {
     if (!window.ethereum) {
       console.error("Ethereum provider not found");
       return;
     }
-
+  
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     const signer = provider.getSigner();
-    const sbIncentives = new ethers.Contract("0x5A42F800e27773d09376464934e59517fDD88371", sbIncentivesABI, signer);
-
+    const sbIncentives = new ethers.Contract("0x07C848357A1a5d1787BbbD07aEC831D54e91cb88", sbIncentivesABI, signer);
+  
     try {
       const tx = await sbIncentives.registerOrUpdateStream(
         address,
         { gasLimit: 3000000 }
       );
-
-      // Disable the button and show loading state
-      if (deleteButtonRef.current[poolId]) {
-        deleteButtonRef.current[poolId]!.disabled = true;
-        deleteButtonRef.current[poolId]!.textContent = 'Deleting...';
-      }
-
       await tx.wait();
-      console.log("Registered successfully");
-      // You might want to add some UI feedback here, like a success message
+      console.log("Liquidation successful");
+
+      refetchWithDelay(1000);
     } catch (error) {
-      console.error("Error deleting flow:", error);
-      // You might want to add some UI feedback here, like an error message
-    } finally {
-      // Re-enable the button and restore original text
-      if (deleteButtonRef.current[poolId]) {
-        deleteButtonRef.current[poolId]!.disabled = false;
-        deleteButtonRef.current[poolId]!.textContent = 'Delete';
-      }
+      console.error("Error in liquidation process:", error);
     }
   };
 
@@ -454,9 +511,9 @@ const Home: NextPage = () => {
                               <div className="bg-[#f3f5fa] rounded-xl p-4">
                                 <p className="text-[#666] text-sm">Accrued Rewards</p>
                                 <p className="text-[#222] text-xl font-bold mt-1 flex items-center gap-2">
-                                  <span>1,234.56 FLOW</span>
+                                  <span>4.1049 FLOW</span>
                                   <span className="text-xs text-[#2a85f0] bg-[#2a85f0]/10 px-2 py-1 rounded-full">
-                                    +123.45 today
+                                    +4.1049  today
                                   </span>
                                 </p>
                               </div>
@@ -466,13 +523,14 @@ const Home: NextPage = () => {
                             <div className="col-span-2 flex gap-3">
                               <button
                                 onClick={() => handleRegistration(pool.id)}
+                                disabled={connectingRewards[pool.id]}
                                 className="flex-1 bg-gradient-to-r from-[#7CFFD4] to-[#4EFEB3] text-[#1A1F3C] rounded-xl px-4 py-3 text-sm font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2"
                               >
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" 
                                     fill="currentColor" stroke="#1A1F3C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                                 </svg>
-                                Earn Rewards
+                                {connectingRewards[pool.id] ? 'Connecting...' : 'Earn Rewards'}
                               </button>
                               <button
                                 ref={setDeleteButtonRef(pool.id)}
@@ -509,8 +567,13 @@ const Home: NextPage = () => {
                     )
                   )
                 )) && (
-                <p className="text-[#222222] text-[18px]">No active positions</p>
+                <p onClick={() => handleRegistration("1")}  className="text-[#222222] text-[18px]">No active positions</p>
               )}
+              <button onClick={() => {handleLiquidate()}}
+                className="bg-[#2a85f0] max-w-[200px] text-white rounded-xl px-6 py-3 hover:bg-[#0664d1] transition font-semibold"
+              >
+                Liquidate
+              </button>
             </div>
           )}
         </div>
